@@ -1,30 +1,10 @@
 #!/usr/bin/env python3
 import math
+from typing import Any
 
-from linear_operator.operators import KernelLinearOperator
 from torch import Tensor
 
-from .keops_kernel import _Anysor, _lazify_and_expand_inputs, KeOpsKernel
-
-
-def _covar_func(x1: _Anysor, x2: _Anysor, nu: float = 2.5, **params) -> _Anysor:
-    x1_, x2_ = _lazify_and_expand_inputs(x1, x2)
-
-    sq_distance = ((x1_ - x2_) ** 2).sum(-1)
-    distance = (sq_distance + 1e-20).sqrt()
-    # ^^ Need to add epsilon to prevent small negative values with the sqrt
-    # backward pass (otherwise we get NaNs).
-    # using .clamp(1e-20, math.inf) doesn't work in KeOps; it also creates NaNs
-    exp_component = (-math.sqrt(nu * 2) * distance).exp()
-
-    if nu == 0.5:
-        constant_component = 1
-    elif nu == 1.5:
-        constant_component = (math.sqrt(3) * distance) + 1
-    elif nu == 2.5:
-        constant_component = (math.sqrt(5) * distance) + (1 + 5.0 / 3.0 * sq_distance)
-
-    return constant_component * exp_component
+from .keops_kernel import KeOpsKernel, _lazify_and_expand_inputs
 
 
 class MaternKernel(KeOpsKernel):
@@ -62,16 +42,27 @@ class MaternKernel(KeOpsKernel):
         super().__init__(**kwargs)
         self.nu = nu
 
-    def forward(self, x1: Tensor, x2: Tensor, diag: bool = False, **kwargs) -> KernelLinearOperator:
+    def forward(self, x1: Tensor, x2: Tensor, diag: bool = False, **kwargs) -> Any:
         mean = x1.reshape(-1, x1.size(-1)).mean(0)[(None,) * (x1.dim() - 1)]
         x1_ = (x1 - mean) / self.lengthscale
         x2_ = (x2 - mean) / self.lengthscale
-        # return KernelLinearOperator inst only when calculating the whole covariance matrix
-        res = KernelLinearOperator(x1_, x2_, covar_func=_covar_func, nu=self.nu, **kwargs)
 
-        # TODO: diag=True mode will be removed with the GpyTorch 2.0 PR to remove LazyEvaluatedKernelTensor
-        # (it will be replaced by a `_symmetric_diag` method for quickly computing the diagonals of symmetric matrices)
-        if diag:
-            return res.diagonal(dim1=-1, dim2=-2)
-        else:
-            return res
+        x1_keops, x2_keops = _lazify_and_expand_inputs(x1_, x2_)
+
+        sq_distance = ((x1_keops - x2_keops) ** 2).sum(-1)
+        distance = (sq_distance + 1e-20).sqrt()
+        # ^^ Need to add epsilon to prevent small negative values with the sqrt
+        # backward pass (otherwise we get NaNs).
+        # using .clamp(1e-20, math.inf) doesn't work in KeOps; it also creates NaNs
+        exp_component = (-math.sqrt(self.nu * 2) * distance).exp()
+
+        if self.nu == 0.5:
+            constant_component = 1
+        elif self.nu == 1.5:
+            constant_component = (math.sqrt(3) * distance) + 1
+        elif self.nu == 2.5:
+            constant_component = (math.sqrt(5) * distance) + (
+                1 + 5.0 / 3.0 * sq_distance
+            )
+
+        return constant_component * exp_component
