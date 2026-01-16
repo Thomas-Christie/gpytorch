@@ -46,11 +46,17 @@ class ComputationAwareELBO(MarginalLogLikelihood):
         # Kernel
         if isinstance(self.model.covar_module, kernels.ScaleKernel):
             outputscale = self.model.covar_module.outputscale
-            lengthscale = self.model.covar_module.base_kernel.lengthscale
+            if self.model.covar_module.base_kernel.has_lengthscale:
+                lengthscale = self.model.covar_module.base_kernel.lengthscale
+            else:
+                lengthscale = 1.0
             kernel_forward_fn = self.model.covar_module.base_kernel._forward_no_kernel_linop
         else:
             outputscale = 1.0
-            lengthscale = self.model.covar_module.lengthscale
+            if self.model.covar_module.has_lengthscale:
+                lengthscale = self.model.covar_module.lengthscale
+            else:
+                lengthscale = 1.0
             kernel_forward_fn = self.model.covar_module._forward_no_kernel_linop
 
         # Explicitly free up memory from prediction to avoid unnecessary memory overhead

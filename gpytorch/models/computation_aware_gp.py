@@ -4,10 +4,10 @@
 import math
 
 import torch
-from linear_operator import operators, utils as linop_utils
+from linear_operator import operators
+from linear_operator import utils as linop_utils
 
 from .. import kernels, likelihoods, means, settings
-
 from ..distributions import MultivariateNormal
 from .exact_gp import ExactGP
 
@@ -103,11 +103,17 @@ class ComputationAwareGP(ExactGP):
             # Kernel forward and hyperparameters
             if isinstance(self.covar_module, kernels.ScaleKernel):
                 outputscale = self.covar_module.outputscale
-                lengthscale = self.covar_module.base_kernel.lengthscale
+                if self.covar_module.base_kernel.has_lengthscale:
+                    lengthscale = self.covar_module.base_kernel.lengthscale
+                else:
+                    lengthscale = 1.0
                 kernel_forward_fn = self.covar_module.base_kernel._forward_no_kernel_linop
             else:
                 outputscale = 1.0
-                lengthscale = self.covar_module.lengthscale
+                if self.covar_module.has_lengthscale:
+                    lengthscale = self.covar_module.lengthscale 
+                else: 
+                    lengthscale = 1.0
                 kernel_forward_fn = self.covar_module._forward_no_kernel_linop
 
             if self.cholfac_gram_SKhatS is None:
